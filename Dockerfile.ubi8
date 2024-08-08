@@ -1,0 +1,59 @@
+# Use the official Red Hat Enterprise Linux 8 base image
+FROM registry.access.redhat.com/ubi8/ubi:latest
+
+# Update the package list and install necessary dependencies
+RUN yum update -y && \
+    yum install -y \
+    gcc \
+    gcc-c++ \
+    make \
+    cyrus-sasl-devel \
+    openldap-devel \
+    libdb-devel \
+    pcre-devel \
+    wget \
+    openssl-devel \
+    libicu \
+    ca-certificates \
+    nss-devel \
+    m4 \
+    ed \
+    libnsl2-devel \
+    kernel-headers \
+    rpcbind \
+    libtirpc-devel && \
+    yum clean all && \
+    rm -rf /var/cache/yum
+
+# Create postfix and postdrop users and groups with specific IDs
+RUN groupadd -g 12345 postfix && \
+    groupadd -g 54321 postdrop && \
+    useradd -u 12345 -g postfix -s /sbin/nologin -r postfix
+
+# Set the Postfix version to install
+ENV POSTFIX_VERSION=3.9.0
+
+# Download and extract the Postfix source code
+RUN wget https://ghostarchive.org/postfix/postfix-release/official/postfix-$POSTFIX_VERSION.tar.gz && \
+    tar -xzf postfix-$POSTFIX_VERSION.tar.gz && \
+    rm postfix-$POSTFIX_VERSION.tar.gz
+
+# Add placeholder configuration files
+RUN mkdir -p /etc/postfix
+COPY files/main.cf /etc/postfix/main.cf
+COPY files/master.cf /etc/postfix/master.cf
+
+# Build and install Postfix with LDAP, PCRE, and CDB support
+WORKDIR /postfix-$POSTFIX_VERSION
+RUN make makefiles CCARGS='-DUSE_TLS -DUSE_SASL_AUTH -DDEF_SERVER_SASL_TYPE=\"dovecot\" -DHAS_LDAP -I/usr/include -DHAS_PCRE -I/usr/include -DHAS_CDB' AUXLIBS='-lldap -lpcre -lcdb -lssl -lcrypto -lnss -ltirpc' && \
+    make && \
+    make install
+
+# Ensure Postfix binaries are in the PATH
+ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Open necessary ports
+EXPOSE 25 587
+
+# Start Postfix master process
+CMD ["postfix", "start-fg"]
